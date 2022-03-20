@@ -4,3 +4,4 @@
 build/
 PyCarGr.egg-info/
 .envrc
+venv/
