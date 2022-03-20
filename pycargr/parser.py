@@ -3,10 +3,11 @@
 
 __author__ = 'Florents Tselai'
 
+from typing import Iterable
 from datetime import datetime
 from urllib.request import urlopen, Request
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag, PageElement
 from fake_useragent import UserAgent
 
 from pycargr.model import Car
@@ -31,7 +32,7 @@ class SearchResultPageParser:
                     self.num_results = int(f.text.split()[0])
 
     def parse(self):
-        for a in self.soup.find_all('a', class_='vehicle list-group-item clsfd_list_row'):
+        for a in self.soup.find_all('a', class_='row-anchor'):
             yield str(int(a.get('href').replace('/', '').split('-')[0].replace('classifiedscarsview', '')))
 
     def __len__(self):
@@ -39,10 +40,27 @@ class SearchResultPageParser:
 
 
 class CarItemParser:
+    CAR_FIELDS = {
+        'bhp': 'Ίπποι',
+        'release_date': 'Χρονολογία',
+        'fuel_type': 'Καύσιμο',
+        'displacement': 'Κυβικά',
+        'milage': 'Χιλιόμετρα',
+        'status': 'Κατάσταση',
+        'price': 'Τιμή',
+        'id': 'Νούμεροαγγελίας',
+        'transmission': 'Σασμάν',
+        'color': 'Χρώμα',
+        'drivetrain': 'Κίνηση',
+        'visits': 'Εμφανίσειςαγγελίας',
+        'euro_class': 'Κλάσηρύπων',
+        'registration': 'Τέληκυκλοφορίας'
+    }
+
     def __init__(self, car_id):
         self.car_id = car_id
         self.req = Request(
-            'https://www.car.gr/%s' % self.car_id,
+            'https://www.car.gr/%s#bigger-photos' % self.car_id,
             data=None,
             headers={
                 'User-Agent': UserAgent().chrome
@@ -51,22 +69,24 @@ class CarItemParser:
         self.html = urlopen(self.req).read().decode('utf-8')
         self.soup = BeautifulSoup(self.html, 'html.parser')
 
-    def parse_km(self):
-        try:
-            for td in self.soup.find_all('td'):
-                if 'χλμ' in td.text:
-                    return float(td.text.replace('.', '').replace('χλμ', ''))
-        except Exception:
-            return None
-        return None
+    def _set_table_field(self, car: Car, key: str, val: str) -> None:
+        result = self.find_attr_row(val)
+        final_value = result.text.replace("\n", "").strip() if result else None
+        setattr(car, key, final_value)
 
-    def parse_bhp(self):
-        try:
-            for td in self.soup.find_all('td'):
-                if 'bhp' in td.text:
-                    return int(td.text.replace(' bhp', ''))
-        except Exception:
-            return None
+    def get_spec_table_rows(self) -> Iterable[PageElement]:
+        return self.soup.find('table', attrs={'id': 'specification-table'}).find("tbody").children
+
+    def find_attr_row(self, attr: str) -> Tag | None:
+        rows = self.get_spec_table_rows()
+        def locate_row(row: Tag) -> bool:
+            if children := row.children:
+                txts = {child.text.replace(" ", "").replace("\n", "") for child in children}
+                return attr in txts
+            return False
+        results = list(filter(locate_row, rows))
+        if results:
+            return list(results[0].children)[-1]
         return None
 
     def parse_title(self):
@@ -75,40 +95,9 @@ class CarItemParser:
         except Exception:
             return None
 
-    def parse_price(self):
-        try:
-            return float(self.soup.find(itemprop='price').text.replace('.', '').replace('€ ', ''))
-        except Exception:
-            return None
-
-    def parse_release_date(self):
-        try:
-            date_str = self.soup.find(itemprop='releaseDate').text.strip()
-            return datetime.strptime(date_str, "%m / %Y").strftime("%b %Y")
-        except Exception:
-            return None
-
-    def parse_engine(self):
-        try:
-            return int(self.soup.find(id='clsfd_engine_%s' % self.car_id).text.replace(' cc', '').replace('.', ''))
-        except Exception:
-            return None
-
-    def parse_color(self):
-        try:
-            return self.soup.find(itemprop='color').text
-        except Exception:
-            return None
-
-    def parse_fueltype(self):
-        try:
-            return self.soup.find(id='clsfd_fueltype_%s' % self.car_id).text
-        except Exception:
-            return None
-
     def parse_description(self):
         try:
-            return self.soup.find(itemprop='description').text
+            return self.soup.find(itemprop='description').text.replace("\n", "").replace("\r", "")
         except Exception:
             return None
 
@@ -132,37 +121,47 @@ class CarItemParser:
         except Exception:
             return None
 
-    def parse_transmission(self):
-        try:
-            return self.soup.find(id='clsfd_transmision_%s' % self.car_id).text
-        except Exception:
-            return None
-
     def parse_images(self):
+        img_request = self.req
+        img_request.full_url = img_request.full_url + "#"
         try:
             images_urls = []
-            for img in self.soup.find_all('img', class_='bigphoto'):
+            for img in self.soup.find_all('img', class_='thumb-img'):
                 images_urls.append(img.get('src').replace(r'//', 'https://').replace('_v', '_b'))
             return images_urls
         except Exception:
             return None
 
-    def parse(self):
+    def parse_seller_info(self) -> dict:
+        seller = {}
+
+        main_seller_info = self.soup.find('div', attrs={'class': 'main-seller-info'})
+
+        seller_anchor = main_seller_info.find('a', attrs={'target': '_blank'})
+        print(seller_anchor)
+        seller['link'] = seller_anchor.attrs['href'] if seller_anchor else None
+        seller['name'] = seller_anchor.attrs['title'] if seller_anchor else None
+
+        seller_span = main_seller_info.find("span")
+
+        seller['region'], seller['zip_code'] = seller_span.text.split() if seller_span else (None, None)
+
+        return seller
+
+    def parse(self) -> Car:
         c = Car(self.car_id)
+
+        # Generic Info
         c.title = self.parse_title()
-        c.price = self.parse_price()
-        c.release_date = self.parse_release_date()
-        c.engine = self.parse_engine()
-        c.km = self.parse_km()
-        c.bhp = self.parse_bhp()
         c.url = self.req.full_url
-        c.color = self.parse_color()
-        c.fueltype = self.parse_fueltype()
         c.description = self.parse_description()
-        c.city = self.parse_city()
-        c.region = self.parse_region()
-        c.postal_code = self.parse_postal_code()
-        c.transmission = self.parse_transmission()
+
+        # Car Specs
+        for field, value in self.CAR_FIELDS.items():
+            self._set_table_field(c, field, value)
+
+        # Seller Info
+        c.seller = self.parse_seller_info()
         c.images = self.parse_images()
         c.html = self.html
         c.scraped_at = datetime.now().isoformat()

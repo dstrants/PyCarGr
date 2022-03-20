@@ -18,7 +18,10 @@ app.config['JSON_AS_ASCII'] = False
 
 @app.route("/api/car/<car>", methods=["GET"])
 def get_car(car):
-    return jsonify(to_dict(parse_car_page(car)))
+    car = to_dict(parse_car_page(car))
+    # Manueally delete the html key to remove the noise
+    del car["html"]
+    return jsonify(car)
 
 
 @app.route("/api/search", methods=["GET"])
