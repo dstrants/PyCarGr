@@ -7,6 +7,7 @@ __author__ = 'Florents Tselai'
 class Car:
     def __init__(self, car_id):
         self._car_id = car_id
+        self.seller = {}
 
     @property
     def car_id(self):
@@ -152,7 +153,7 @@ class Car:
 def to_dict(model):
     return dict((get_key(key), value)
                 for key, value in model.__dict__.items()
-                if not callable(value) and not key.startswith("__"))
+                if not callable(value) and not key.startswith("__") and key != "html")
 
 
 def get_key(key):
