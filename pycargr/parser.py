@@ -137,14 +137,20 @@ class CarItemParser:
 
         main_seller_info = self.soup.find('div', attrs={'class': 'main-seller-info'})
 
+        if not main_seller_info:
+            print(f'No main seller info found for car {self.car_id}')
+            return {}
+
         seller_anchor = main_seller_info.find('a', attrs={'target': '_blank'})
-        print(seller_anchor)
-        seller['link'] = seller_anchor.attrs['href'] if seller_anchor else None
+        seller['link'] = seller_anchor.attrs['href'] if 'href' in seller_anchor else None
         seller['name'] = seller_anchor.attrs['title'] if seller_anchor else None
 
         seller_span = main_seller_info.find("span")
 
-        seller['region'], seller['zip_code'] = seller_span.text.split() if seller_span else (None, None)
+        try:
+            seller['region'], seller['zip_code'] = seller_span.text.split() if seller_span else (None, None)
+        except ValueError:
+            print(seller_span.text)
 
         return seller
 
@@ -163,7 +169,6 @@ class CarItemParser:
         # Seller Info
         c.seller = self.parse_seller_info()
         c.images = self.parse_images()
-        c.html = self.html
         c.scraped_at = datetime.now().isoformat()
 
         return c
